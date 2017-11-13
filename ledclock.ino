@@ -1,6 +1,5 @@
-/*  
+/* 1. UNSET не нужен. вместо него RTC_FAIL 
  * 2. LDR учитывать в режимах WATCH и UNSET
- *
  * 3. Отладка ошибок RTC
  */
 
@@ -17,6 +16,7 @@
 #define UNSET              0
 #define WATCH              1
 #define SETTING            2
+#define RTC_FAIL           3
 
 // circles drawning
 #define CIRCLE_MAGIC       40
@@ -165,6 +165,8 @@ void setup() {
 
 void loop() {
 	tmElements_t time;
+	//deviceMode = RTC_FAIL;
+	
 	
 	if (RTC.read(time)) {        // RTC is online, time is set
 		 deviceMode = WATCH;
@@ -175,6 +177,7 @@ void loop() {
 			deviceMode = RTC_FAIL;
 		}
 	}
+	
 	
   switch(deviceMode) {
   case UNSET:    
@@ -218,6 +221,10 @@ void loop() {
   case WATCH:
 
     GetLedDelays();  // calculate delayOn and delayOff
+		currentTime.hourTens    = time.Hour / 10;
+		currentTime.hourUnits   = time.Hour % 10;
+		currentTime.minuteTens  = time.Minute / 10;
+		currentTime.minuteUnits = time.Minute % 10;
 
     LedSwitch(HOUR_TENS_LED);
     ShowSymbol(currentTime.hourTens);
@@ -371,34 +378,34 @@ void loop() {
     }
 
   case RTC_FAIL:
-		/*
-		currentTime.hourTens   = SYMBOL_r;
-		currentTime.hourUnits  = SYMBOL_t;
-		currentTime.minuteTens = SYMBOL_c;
-		currentTime.minuteTens = SYMBOL_E;
-		*/
+		
+		currentTime.hourTens    = SYMBOL_r;
+		currentTime.hourUnits   = SYMBOL_t;
+		currentTime.minuteTens  = SYMBOL_c;
+		currentTime.minuteUnits = SYMBOL_E;
+		
 		
 		GetLedDelays();
 		
-		LedSwitch(SYMBOL_r);
+		LedSwitch(HOUR_TENS_LED);
     ShowSymbol(currentTime.hourTens);
     delayMicroseconds(delayOn);
     LedSwitch(NO_LED);
     delayMicroseconds(delayOff);
 
-    LedSwitch(SYMBOL_t);
+    LedSwitch(HOUR_UNITS_LED);
     ShowSymbol(currentTime.hourUnits);
     delayMicroseconds(delayOn);
     LedSwitch(NO_LED);
     delayMicroseconds(delayOff);
 
-    LedSwitch(SYMBOL_c);
+    LedSwitch(MINUTE_TENS_LED);
     ShowSymbol(currentTime.minuteTens);
     delayMicroseconds(delayOn);
     LedSwitch(NO_LED);
     delayMicroseconds(delayOff);
 
-    LedSwitch(SYMBOL_E);
+    LedSwitch(MINUTE_UNITS_LED);
     ShowSymbol(currentTime.minuteUnits);
     delayMicroseconds(delayOn);
     LedSwitch(NO_LED);
@@ -412,7 +419,7 @@ void loop() {
 void ShowSymbol(unsigned char Symbol) {
   switch(Symbol)
   {
-  case 0:
+  case SYMBOL_0:
     digitalWrite( LED_A, HIGH);
     digitalWrite( LED_B, HIGH);
     digitalWrite( LED_C, HIGH);
@@ -422,7 +429,7 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_G, LOW);
     break;
 
-  case 1:
+  case SYMBOL_1:
     digitalWrite( LED_A, HIGH);
     digitalWrite( LED_B, HIGH);
     digitalWrite( LED_C, LOW);
@@ -432,7 +439,7 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_G, LOW);
     break;
 
-  case 2:
+  case SYMBOL_2:
     digitalWrite( LED_A, HIGH);
     digitalWrite( LED_B, LOW);
     digitalWrite( LED_C, HIGH);
@@ -442,7 +449,7 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_G, HIGH);
     break;
 
-  case 3:
+  case SYMBOL_3:
     digitalWrite( LED_A, HIGH);
     digitalWrite( LED_B, HIGH);
     digitalWrite( LED_C, HIGH);
@@ -452,7 +459,7 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_G, HIGH); 
     break;
 
-  case 4:
+  case SYMBOL_4:
     digitalWrite( LED_A, HIGH);
     digitalWrite( LED_B, HIGH);
     digitalWrite( LED_C, LOW);
@@ -462,7 +469,7 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_G, HIGH);
     break;
 
-  case 5:
+  case SYMBOL_5:
     digitalWrite( LED_A, LOW);
     digitalWrite( LED_B, HIGH);
     digitalWrite( LED_C, HIGH);
@@ -472,7 +479,7 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_G, HIGH);
     break;
 
-  case 6:
+  case SYMBOL_6:
     digitalWrite( LED_A, LOW);
     digitalWrite( LED_B, HIGH);
     digitalWrite( LED_C, HIGH);
@@ -482,7 +489,7 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_G, HIGH);
     break;
 
-  case 7:
+  case SYMBOL_7:
     digitalWrite( LED_A, HIGH);
     digitalWrite( LED_B, HIGH);
     digitalWrite( LED_C, LOW);
@@ -492,7 +499,7 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_G, LOW);
     break;
 
-  case 8:
+  case SYMBOL_8:
     digitalWrite( LED_A, HIGH);
     digitalWrite( LED_B, HIGH);
     digitalWrite( LED_C, HIGH);
@@ -502,7 +509,7 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_G, HIGH);
     break;
 
-  case 9:
+  case SYMBOL_9:
     digitalWrite( LED_A, HIGH);
     digitalWrite( LED_B, HIGH);
     digitalWrite( LED_C, HIGH);
@@ -532,7 +539,45 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_G, HIGH);
     break;
 
+	case SYMBOL_r: 
+    digitalWrite( LED_A, LOW);
+    digitalWrite( LED_B, LOW);
+    digitalWrite( LED_C, LOW);
+    digitalWrite( LED_D, HIGH);
+    digitalWrite( LED_E, LOW);
+    digitalWrite( LED_F, LOW);
+    digitalWrite( LED_G, HIGH);
+    break;
 
+	case SYMBOL_t: 
+    digitalWrite( LED_A, LOW);
+    digitalWrite( LED_B, LOW);
+    digitalWrite( LED_C, HIGH);
+    digitalWrite( LED_D, HIGH);
+    digitalWrite( LED_E, HIGH);
+    digitalWrite( LED_F, LOW);
+    digitalWrite( LED_G, HIGH);
+    break;
+	
+	case SYMBOL_c: 
+    digitalWrite( LED_A, LOW);
+    digitalWrite( LED_B, LOW);
+    digitalWrite( LED_C, HIGH);
+    digitalWrite( LED_D, HIGH);
+    digitalWrite( LED_E, LOW);
+    digitalWrite( LED_F, LOW);
+    digitalWrite( LED_G, HIGH);
+    break;
+
+	case SYMBOL_E:
+    digitalWrite( LED_A, LOW);
+    digitalWrite( LED_B, LOW);
+    digitalWrite( LED_C, HIGH);
+    digitalWrite( LED_D, HIGH);
+    digitalWrite( LED_E, HIGH);
+    digitalWrite( LED_F, HIGH);
+    digitalWrite( LED_G, HIGH);
+		
   case 254:
     digitalWrite( LED_A, HIGH);
     digitalWrite( LED_B, LOW);
