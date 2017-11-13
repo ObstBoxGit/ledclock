@@ -1,11 +1,12 @@
-/*
- * 1. почему состояние кнопки сбрасывается в DEPRESSED не только внутри
- * ReadMainBatton() но и в обработчиках
- * 
+/*  
  * 2. LDR учитывать в режимах WATCH и UNSET
+ *
+ * 3. Отладка ошибок RTC
  */
 
- 
+#include <Wire.h>
+#include <TimeLib.h>
+#include <DS1307RTC.h>
  
 // pressures
 #define DEPRESSED          0
@@ -45,8 +46,22 @@
 #define LED_E              6
 
 // symbols
-#define SYMBOL_MINUS  253
-#define SYMBOL_NONE   252
+#define SYMBOL_0           0
+#define SYMBOL_1           1
+#define SYMBOL_2           2
+#define SYMBOL_3           3
+#define SYMBOL_4           4
+#define SYMBOL_5           5
+#define SYMBOL_6           6
+#define SYMBOL_7           7
+#define SYMBOL_8           8
+#define SYMBOL_9           9
+#define SYMBOL_MINUS       10
+#define SYMBOL_NONE        11
+#define SYMBOL_r           12
+#define SYMBOL_t           13
+#define SYMBOL_c           14
+#define SYMBOL_E           15
 
 // other stuff
 #define DELAY_FULL 2000 // us
@@ -149,6 +164,18 @@ void setup() {
 }
 
 void loop() {
+	tmElements_t time;
+	
+	if (RTC.read(time)) {        // RTC is online, time is set
+		 deviceMode = WATCH;
+	}	else {
+		if (RTC.chipPresent()) {	// time not set yet
+			deviceMode = SETTING;
+		} else {			
+			deviceMode = RTC_FAIL;
+		}
+	}
+	
   switch(deviceMode) {
   case UNSET:    
 
@@ -214,30 +241,7 @@ void loop() {
     ShowSymbol(currentTime.minuteUnits);
     delayMicroseconds(delayOn);
     LedSwitch(NO_LED);
-    delayMicroseconds(delayOff);
-
-
-    /*
-    Serial.begin(9600);
-          i++;
-          if (i % 200 == 0) {
-            i = 0;
-            Serial.println(delayOn);
-            Serial.println(delayOff);
-            Serial.println("----");
-            }
-            */
-
-    /*
-    delay(1000);
-    Serial.begin(9600);
-    while(1) {      
-    Serial.print("got: ");
-    Serial.print(delayOn, DEC);
-    Serial.print(" , ");
-    Serial.println(delayOff, DEC);
-    }
-    */
+    delayMicroseconds(delayOff);    
 
     ReadMainButton();
     if (mainButton.state == LONG) {
@@ -366,7 +370,41 @@ void loop() {
       break;
     }
 
-  default:
+  case RTC_FAIL:
+		/*
+		currentTime.hourTens   = SYMBOL_r;
+		currentTime.hourUnits  = SYMBOL_t;
+		currentTime.minuteTens = SYMBOL_c;
+		currentTime.minuteTens = SYMBOL_E;
+		*/
+		
+		GetLedDelays();
+		
+		LedSwitch(SYMBOL_r);
+    ShowSymbol(currentTime.hourTens);
+    delayMicroseconds(delayOn);
+    LedSwitch(NO_LED);
+    delayMicroseconds(delayOff);
+
+    LedSwitch(SYMBOL_t);
+    ShowSymbol(currentTime.hourUnits);
+    delayMicroseconds(delayOn);
+    LedSwitch(NO_LED);
+    delayMicroseconds(delayOff);
+
+    LedSwitch(SYMBOL_c);
+    ShowSymbol(currentTime.minuteTens);
+    delayMicroseconds(delayOn);
+    LedSwitch(NO_LED);
+    delayMicroseconds(delayOff);
+
+    LedSwitch(SYMBOL_E);
+    ShowSymbol(currentTime.minuteUnits);
+    delayMicroseconds(delayOn);
+    LedSwitch(NO_LED);
+    delayMicroseconds(delayOff);
+	
+	default:
     break;
   }  
 }
@@ -474,7 +512,7 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_G, HIGH);
     break;
 
-  case SYMBOL_NONE: //252 
+  case SYMBOL_NONE: 
     digitalWrite( LED_A, LOW);
     digitalWrite( LED_B, LOW);
     digitalWrite( LED_C, LOW);
@@ -484,7 +522,7 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_G, LOW);
     break;
 
-  case SYMBOL_MINUS: //253
+  case SYMBOL_MINUS: 
     digitalWrite( LED_A, LOW);
     digitalWrite( LED_B, LOW);
     digitalWrite( LED_C, LOW);
