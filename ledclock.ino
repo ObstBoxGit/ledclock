@@ -30,11 +30,8 @@
 #define NO_LED             0
 #define HOUR_TENS_LED      A0
 #define HOUR_UNITS_LED     A1
-//#define MINUTE_TENS_LED  A2
 #define MINUTE_TENS_LED    2
-//#define MINUTE_UNITS_LED A3
 #define MINUTE_UNITS_LED   3
-//#define LDR_PIN          A6
 #define LDR_PIN            A2
 
 #define BUTTON_PIN         4
@@ -66,7 +63,7 @@
 #define SYMBOL_E           15
 
 // other stuff
-#define DELAY_FULL 2000 // us
+#define DELAY_FULL 2000         // us
 #define BUTTON_THRESHOLD1  5
 #define BUTTON_THRESHOLD2  50
 #define LDR_THRESHOLD_MIN  600
@@ -139,30 +136,29 @@ void setup() {
   pinMode(LED_E, OUTPUT);
   pinMode(LED_F, OUTPUT);
   pinMode(LED_G, OUTPUT);
-  //pinMode( 5, OUTPUT);
+  
   pinMode(HOUR_TENS_LED, OUTPUT);
   pinMode(HOUR_UNITS_LED, OUTPUT);
   pinMode(MINUTE_TENS_LED, OUTPUT);
   pinMode(MINUTE_UNITS_LED, OUTPUT);
 
-  currentTime.hourTens = 0;
-  currentTime.hourUnits  = 7;
+  currentTime.hourTens    = 0;
+  currentTime.hourUnits   = 7;
   currentTime.minuteTens  = 2;
-  currentTime.minuteUnits  = 9;  
+  currentTime.minuteUnits = 9;  
   currentTime.flag    = false;
   currentTime.seconds = 0;
 
   mainButton.counter  = 0;  
-  mainButton.state = DEPRESSED;  
+  mainButton.state    = DEPRESSED;  
 
-  delayOn = 0;
-  delayOff = 0;  
-  blinkCounter = 0;
-  LDRSignal = 0;
   temp = 0;
+  delayOn  = 0;
+  delayOff = 0;  
   selector = 0;      
-  deviceMode = UNSET;
-  //deviceMode = WATCH;
+  blinkCounter = 0;
+  LDRSignal    = 0;
+  deviceMode   = UNSET;  
 	
 	#ifdef SERIAL_DEBUG
 	Serial.begin(9600);
@@ -171,9 +167,7 @@ void setup() {
 	#endif
 }
 
-void loop() {
-	//deviceMode = RTC_FAIL;
-	
+void loop() {	
 	
 	if (RTC.read(time)) {        // RTC is online, time is set
 		 deviceMode = WATCH;
@@ -222,13 +216,8 @@ void loop() {
       currentTime.seconds = 0;
       mainButton.state  = DEPRESSED;
       deviceMode = SETTING;          
-    }
-		
-/* 		#ifdef SERIAL_DEBUG
-		Serial.println("UNSET");
-		delay(20);
-		#endif
- */	
+    }		
+	
 		DebugMessage("Unset");
     break;
 		
@@ -238,11 +227,6 @@ void loop() {
   case WATCH:
 
     GetLedDelays();  // calculate delayOn and delayOff
-/* 		currentTime.hourTens    = time.Hour / 10;
-		currentTime.hourUnits   = time.Hour % 10;
-		currentTime.minuteTens  = time.Minute / 10;
-		currentTime.minuteUnits = time.Minute % 10;
- */
     
 		TimeToTensUnits();
 		
@@ -276,11 +260,6 @@ void loop() {
       mainButton.state  = DEPRESSED;
     }
 		
-/* 		#ifdef SERIAL_DEBUG
-		Serial.println("WATCH");
-		delay(20);
-		#endif
- */	
 		DebugMessage("Watch");
     break;
 		
@@ -407,13 +386,8 @@ void loop() {
 
     default:     
 			break;
-    }
-		
-/* 		#ifdef SERIAL_DEBUG
-		Serial.println("SETTING");
-		delay(20);
-		#endif
- */	
+    }		
+
 		DebugMessage("Setting");
 		break;
 		
@@ -453,11 +427,6 @@ void loop() {
     LedSwitch(NO_LED);
     delayMicroseconds(delayOff);
 		
-/* 		#ifdef SERIAL_DEBUG
-		Serial.println("RTC fail");
-		delay(20);
-		#endif
- */		
 		DebugMessage("RTC fail");
 		break;
 		
@@ -465,11 +434,6 @@ void loop() {
 		
 	
 	default:
-/* 		#ifdef SERIAL_DEBUG
-		Serial.println("default");
-		delay(20);
-		#endif
- */    
     DebugMessage("Default");
 		break;
   }  
