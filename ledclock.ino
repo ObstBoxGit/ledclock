@@ -1,6 +1,7 @@
 /* 1. UNSET не нужен. вместо него RTC_FAIL 
  * 2. LDR учитывать в режимах WATCH и UNSET
  * 3. Отладка ошибок RTC
+ * 4. может стоит убрать SETTING из switch'а в начало loop() { if {..} } ?
  */
 
 #define SERIAL_DEBUG 
@@ -66,12 +67,13 @@
 #define DELAY_FULL 2000         // us
 #define BUTTON_THRESHOLD1  5
 #define BUTTON_THRESHOLD2  50
+// #define BUTTON_THRESHOLD2  100
 #define LDR_THRESHOLD_MIN  600
 #define LDR_THRESHOLD_MED  900
 #define LDR_THRESHOLD_MAX  1010 // <= 1024
 
 // variables
-volatile struct newTime{
+struct newTime{
   unsigned char hourTens;
   unsigned char hourUnits;  
   unsigned char minuteTens;
@@ -81,21 +83,21 @@ volatile struct newTime{
 } 
 currentTime;
 
-volatile struct newButton{
+struct newButton{
   unsigned char counter;
   unsigned char state;  
 } 
 mainButton;
 
-volatile unsigned char deviceMode;
-volatile byte temp;
-volatile byte blinkCounter;
-volatile byte selector;
-volatile unsigned int secondsCounter;
-volatile unsigned int LDRSignal;
-volatile unsigned int delayOn;
-volatile unsigned int delayOff;
-volatile unsigned int i = 0;
+unsigned char deviceMode;
+byte temp;
+byte blinkCounter;
+byte selector;
+unsigned int secondsCounter;
+unsigned int LDRSignal;
+unsigned int delayOn;
+unsigned int delayOff;
+unsigned int i = 0;
 
 // function prototypes
 void LedSwitch(unsigned char Led);
@@ -162,26 +164,30 @@ void setup() {
 	
 	#ifdef SERIAL_DEBUG
 	Serial.begin(9600);
-  while (!Serial) ; // wait for serial
+  // while (!Serial) ; // wait for serial
   delay(200);
 	#endif
 }
 
 void loop() {	
-	
-	if (RTC.read(time)) {        // RTC is online, time is set
-		 deviceMode = WATCH;
-	}	else {
-		if (RTC.chipPresent()) {	// time not set yet
-			deviceMode = UNSET;
-		} else {			
-			deviceMode = RTC_FAIL;
+
+	if (deviceMode != SETTING) {	 // otherwise SETTING mode will be never reached
+		
+		if (RTC.read(time)) {        // RTC is online, time is set
+			 deviceMode = WATCH;
+		}	else {
+			if (RTC.chipPresent()) {	// time not set yet
+				deviceMode = UNSET;
+			} else {			
+				deviceMode = RTC_FAIL;	
+			}
 		}
 	}
 	
-	
   switch(deviceMode) {
   case UNSET:    
+	
+		DebugMessage("Unset");
 
     GetLedDelays();
 
@@ -218,7 +224,6 @@ void loop() {
       deviceMode = SETTING;          
     }		
 	
-		DebugMessage("Unset");
     break;
 		
 		
@@ -226,7 +231,9 @@ void loop() {
 
   case WATCH:
 
-    GetLedDelays();  // calculate delayOn and delayOff
+		DebugMessage("Watch");
+    
+		GetLedDelays();  // calculate delayOn and delayOff
     
 		TimeToTensUnits();
 		
@@ -255,12 +262,16 @@ void loop() {
     delayMicroseconds(delayOff);    
 
     ReadMainButton();
+		if (mainButton.state == SHORT) {      
+			mainButton.state  = DEPRESSED;
+			DebugMessage("watch.short");
+    }
     if (mainButton.state == LONG) {
-      deviceMode = SETTING;
-      mainButton.state  = DEPRESSED;
+      deviceMode = SETTING;      
+			mainButton.state  = DEPRESSED;
+			DebugMessage("watch.long");
     }
 		
-		DebugMessage("Watch");
     break;
 		
 		
@@ -268,6 +279,12 @@ void loop() {
 
   case SETTING:
 		
+			// time.Hour = 23;
+			// time.Minute = 59;
+			// RTC.write(time);
+		DebugMessage("Setting");
+		
+		TimeToTensUnits();
 		
     switch(selector) {
     case 0:            
@@ -284,11 +301,11 @@ void loop() {
 
       ReadMainButton();
 
-      if (mainButton.state == SHORT) {
+      /* if (mainButton.state == SHORT) {
         currentTime.hourTens++;
         if (currentTime.hourTens > 2) currentTime.hourTens = 0;
         mainButton.state  = DEPRESSED;
-      }
+      } */
       if (mainButton.state == LONG) {
         selector++;
         blinkCounter = 0;
@@ -311,7 +328,7 @@ void loop() {
 
       ReadMainButton();
 
-      if (mainButton.state == SHORT) {
+      /* if (mainButton.state == SHORT) {
         currentTime.hourUnits++;
         if (currentTime.hourTens < 2) {
           if (currentTime.hourUnits > 9) currentTime.hourUnits = 0;
@@ -320,7 +337,7 @@ void loop() {
           if (currentTime.hourUnits > 3) currentTime.hourUnits = 0;
         }
         mainButton.state  = DEPRESSED;
-      }
+      } */
       if (mainButton.state == LONG) {
         selector++;
         blinkCounter = 0;
@@ -343,11 +360,11 @@ void loop() {
 
       ReadMainButton();
 
-      if (mainButton.state == SHORT) {
+      /* if (mainButton.state == SHORT) {
         currentTime.minuteTens++;
         if (currentTime.minuteTens > 5) currentTime.minuteTens = 0;
         mainButton.state  = DEPRESSED;
-      }
+      } */
       if (mainButton.state == LONG) {
         selector++;
         blinkCounter = 0;
@@ -370,11 +387,11 @@ void loop() {
 
       ReadMainButton();
 
-      if (mainButton.state == SHORT) {
+      /* if (mainButton.state == SHORT) {
         currentTime.minuteUnits++;
         if (currentTime.minuteUnits > 9) currentTime.minuteUnits = 0;
         mainButton.state  = DEPRESSED;
-      }
+      } */
       if (mainButton.state == LONG) {
         selector = 0;
         deviceMode = WATCH;
@@ -388,13 +405,14 @@ void loop() {
 			break;
     }		
 
-		DebugMessage("Setting");
 		break;
 		
 		
 		
 		
   case RTC_FAIL:
+		
+		DebugMessage("RTC fail");		
 		
 		currentTime.hourTens    = SYMBOL_r;
 		currentTime.hourUnits   = SYMBOL_t;
@@ -427,7 +445,6 @@ void loop() {
     LedSwitch(NO_LED);
     delayMicroseconds(delayOff);
 		
-		DebugMessage("RTC fail");
 		break;
 		
 		
@@ -601,26 +618,6 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_F, HIGH);
     digitalWrite( LED_G, HIGH);
 		break;
-		
-  case 254:
-    digitalWrite( LED_A, HIGH);
-    digitalWrite( LED_B, LOW);
-    digitalWrite( LED_C, LOW);
-    digitalWrite( LED_D, LOW);
-    digitalWrite( LED_E, HIGH);
-    digitalWrite( LED_F, HIGH);
-    digitalWrite( LED_G, HIGH);
-    break;
-
-  case 255:
-    digitalWrite( LED_A, LOW);
-    digitalWrite( LED_B, HIGH);
-    digitalWrite( LED_C, HIGH);
-    digitalWrite( LED_D, HIGH);
-    digitalWrite( LED_E, LOW);
-    digitalWrite( LED_F, LOW);
-    digitalWrite( LED_G, HIGH);
-    break;
 
   default:
     break;
