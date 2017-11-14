@@ -3,6 +3,8 @@
  * 3. Отладка ошибок RTC
  */
 
+#define SERIAL_DEBUG 
+ 
 #include <Wire.h>
 #include <TimeLib.h>
 #include <DS1307RTC.h>
@@ -105,6 +107,7 @@ void ReadMainButton();
 int  ReadLDR();
 void GetLedDelays();
 
+tmElements_t time;
 
 //--------------------------------------------------
 void setup() {
@@ -160,11 +163,15 @@ void setup() {
   selector = 0;      
   deviceMode = UNSET;
   //deviceMode = WATCH;
-
+	
+	#ifdef SERIAL_DEBUG
+	Serial.begin(9600);
+  while (!Serial) ; // wait for serial
+  delay(200);
+	#endif
 }
 
 void loop() {
-	tmElements_t time;
 	//deviceMode = RTC_FAIL;
 	
 	
@@ -172,7 +179,7 @@ void loop() {
 		 deviceMode = WATCH;
 	}	else {
 		if (RTC.chipPresent()) {	// time not set yet
-			deviceMode = SETTING;
+			deviceMode = UNSET;
 		} else {			
 			deviceMode = RTC_FAIL;
 		}
@@ -216,17 +223,30 @@ void loop() {
       mainButton.state  = DEPRESSED;
       deviceMode = SETTING;          
     }
+		
+/* 		#ifdef SERIAL_DEBUG
+		Serial.println("UNSET");
+		delay(20);
+		#endif
+ */	
+		DebugMessage("Unset");
     break;
+		
+		
+		
 
   case WATCH:
 
     GetLedDelays();  // calculate delayOn and delayOff
-		currentTime.hourTens    = time.Hour / 10;
+/* 		currentTime.hourTens    = time.Hour / 10;
 		currentTime.hourUnits   = time.Hour % 10;
 		currentTime.minuteTens  = time.Minute / 10;
 		currentTime.minuteUnits = time.Minute % 10;
-
-    LedSwitch(HOUR_TENS_LED);
+ */
+    
+		TimeToTensUnits();
+		
+		LedSwitch(HOUR_TENS_LED);
     ShowSymbol(currentTime.hourTens);
     delayMicroseconds(delayOn);
     LedSwitch(NO_LED);
@@ -255,9 +275,21 @@ void loop() {
       deviceMode = SETTING;
       mainButton.state  = DEPRESSED;
     }
+		
+/* 		#ifdef SERIAL_DEBUG
+		Serial.println("WATCH");
+		delay(20);
+		#endif
+ */	
+		DebugMessage("Watch");
     break;
+		
+		
+		
 
   case SETTING:
+		
+		
     switch(selector) {
     case 0:            
       ShowSymbol(currentTime.hourTens);             
@@ -370,20 +402,30 @@ void loop() {
         blinkCounter = 0;
         mainButton.state  = DEPRESSED;
       }   
-      delayMicroseconds(DELAY_FULL); 
+      delayMicroseconds(DELAY_FULL); 		
       break;       
 
-    default:
-      break;
+    default:     
+			break;
     }
-
+		
+/* 		#ifdef SERIAL_DEBUG
+		Serial.println("SETTING");
+		delay(20);
+		#endif
+ */	
+		DebugMessage("Setting");
+		break;
+		
+		
+		
+		
   case RTC_FAIL:
 		
 		currentTime.hourTens    = SYMBOL_r;
 		currentTime.hourUnits   = SYMBOL_t;
 		currentTime.minuteTens  = SYMBOL_c;
-		currentTime.minuteUnits = SYMBOL_E;
-		
+		currentTime.minuteUnits = SYMBOL_E;		
 		
 		GetLedDelays();
 		
@@ -410,9 +452,26 @@ void loop() {
     delayMicroseconds(delayOn);
     LedSwitch(NO_LED);
     delayMicroseconds(delayOff);
+		
+/* 		#ifdef SERIAL_DEBUG
+		Serial.println("RTC fail");
+		delay(20);
+		#endif
+ */		
+		DebugMessage("RTC fail");
+		break;
+		
+		
+		
 	
 	default:
-    break;
+/* 		#ifdef SERIAL_DEBUG
+		Serial.println("default");
+		delay(20);
+		#endif
+ */    
+    DebugMessage("Default");
+		break;
   }  
 }
 
@@ -577,6 +636,7 @@ void ShowSymbol(unsigned char Symbol) {
     digitalWrite( LED_E, HIGH);
     digitalWrite( LED_F, HIGH);
     digitalWrite( LED_G, HIGH);
+		break;
 		
   case 254:
     digitalWrite( LED_A, HIGH);
@@ -695,3 +755,16 @@ void GetLedDelays() {
   }	
 }
 
+void DebugMessage(String str) {
+	#ifdef SERIAL_DEBUG
+	Serial.println(str);
+	delay(30);
+	#endif
+}
+
+void TimeToTensUnits() {
+		currentTime.hourTens    = time.Hour / 10;
+		currentTime.hourUnits   = time.Hour % 10;
+		currentTime.minuteTens  = time.Minute / 10;
+		currentTime.minuteUnits = time.Minute % 10;
+}
