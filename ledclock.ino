@@ -2,7 +2,7 @@
  * 
  * 
  * *******************************************************************/
-#define SERIAL_DEBUG 
+//~ #define SERIAL_DEBUG 
 
 #include <Wire.h>
 #include <TimeLib.h>
@@ -41,12 +41,19 @@
 
 #define SYMBOL_SEGMENTS_AMOUNT    7
 #define DISPLAY_DIGITS_AMOUNT      4
-#define FINAL_TICK 4
+#define FINAL_TICK (DISPLAY_DIGITS_AMOUNT*100)
 
 enum ButtonState {
     DEPRESSED = 0,
     SHORT_PRESS,
     LONG_PRESS
+};
+
+enum DeviceMode {
+    WATCH = 0,
+    SETTING,
+    RTC_FAIL,
+    UNSET
 };
 
 enum Symbol {
@@ -112,8 +119,9 @@ typedef struct {
   boolean tick;
 } SystemTimer;
 
-Button mainButton;
-SystemTimer systemTimer;
+Button main_button;
+SystemTimer system_timer;
+DeviceMode device_mode = WATCH;
   
 
 uint8_t const raw_data[DISPLAY_DIGITS_AMOUNT] = {6,7,8,9};
@@ -154,8 +162,8 @@ void setup () {
   digitalWrite(LED_G_PIN, LOW);
   digitalWrite(ROUND_LED_PIN, LOW);
 
-  systemTimer.counter = 0;
-  systemTimer.tick = false;
+  system_timer.counter = 0;
+  system_timer.tick = false;
 
   MsTimer2::set(TIMER_INTERRUPT_UP, systemTick);
   MsTimer2::start();
@@ -165,44 +173,56 @@ void setup () {
 
 // --------------------------------------------------------------------------------------------------------------
 void loop() {
-  //~ for (uint8_t i = 0; i < DISPLAY_DIGITS_AMOUNT; i++) {    
-    //~ displayShowDigit(HOUR_TENS_LED_PIN, SYMBOL_7);
-    //~ displayShowDigit(HOUR_UNITS_LED_PIN, SYMBOL_MINUS);
-    //~ displayShowDigit(MINUTE_TENS_LED_PIN, SYMBOL_MINUS);
-    //~ displayShowDigit(MINUTE_UNITS_LED_PIN, SYMBOL_9);    
-  //~ }   
   
-  if ( systemTimer.tick == true) {
-    systemTimer.tick = false;
+  if ( system_timer.tick == true) {
+    system_timer.tick = false;    
+
+    showNextDigit();
     
-    displayShowDigit(display_digits_pins[systemTimer.counter], raw_data[systemTimer.counter]);  
-    
-    if (systemTimer.counter % 3 == 1) {  
-      readButton();          
-      //~ Serial.println("readed a button!");
-    //~ } else {
-      //~ Serial.println("casual");
-    } 
-  
-    if (mainButton.state == LONG_PRESS) Serial.println("so looong");
-    if (mainButton.state == SHORT_PRESS) Serial.println("shrt");
+    if (system_timer.tick % 4 == 0) {
+      readButton();
+    }
+
+    if (system_timer.tick % 100 == 0) {
+      switch (device_mode) {
+        case WATCH:
+          if (main_button.state == LONG_PRESS) {
+            device_mode = SETTING;
+          }
+          break;
+
+        case SETTING:
+          break;
+
+        case RTC_FAIL:
+          break;
+      }
+
+      
+      if (main_button.state == LONG_PRESS) {
+        ;
+      }
+    }
   }
+
+  
+  
 }
 
 
 // --------------------------------------------------------------------------------------------------------------
 void displayShowDigit(uint8_t index, uint8_t current_symbol) {
     
-  leds_off_duration = map(readLightDrivenResistor(), 0, 1023, 0, DISPLAY_PERIOD_FULL_US);
-  leds_on_duration = DISPLAY_PERIOD_FULL_US - leds_off_duration;
+    leds_off_duration = map(readLightDrivenResistor(), 0, 1023, 0, DISPLAY_PERIOD_FULL_US);
+    leds_on_duration = DISPLAY_PERIOD_FULL_US - leds_off_duration;
 
-  setDigitalSegments(current_symbol);
+    setDigitalSegments(current_symbol);
 
-  displayDigitOn(index);
-  delayMicroseconds(leds_on_duration);
+    displayDigitOn(index);
+    delayMicroseconds(leds_on_duration);
     
-  displayDigitOff(index);
-  delayMicroseconds(leds_off_duration);
+    displayDigitOff(index);
+    delayMicroseconds(leds_off_duration);
 }
 
 void displayDigitOff(uint8_t pin) {
@@ -229,31 +249,32 @@ uint16_t readLightDrivenResistor() {
 
 void readButton() {
   if (digitalRead(MAIN_BUTTON_PIN) == LOW) {    // is pressed
-    if (mainButton.counter <= BUTTON_THRESHOLD2) mainButton.counter++;
+    if (main_button.counter <= BUTTON_THRESHOLD2) main_button.counter++;
   }
   else {    // is released
-    if ((mainButton.counter >= BUTTON_THRESHOLD1) && (mainButton.counter < BUTTON_THRESHOLD2)) {
-      mainButton.counter = 0;
-      mainButton.state = SHORT_PRESS;
+    if ((main_button.counter >= BUTTON_THRESHOLD1) && (main_button.counter < BUTTON_THRESHOLD2)) {
+      main_button.counter = 0;
+      main_button.state = SHORT_PRESS;
     }
-    else if (mainButton.counter >= BUTTON_THRESHOLD2) {
-      mainButton.counter = 0;
-      mainButton.state = LONG_PRESS;
+    else if (main_button.counter >= BUTTON_THRESHOLD2) {
+      main_button.counter = 0;
+      main_button.state = LONG_PRESS;
     }
-    else {  // mainButton.counter < BUTTON_THRESHOLD1 < BUTTON_THRESHOLD2
-      mainButton.counter = 0;
-      mainButton.state = DEPRESSED;
+    else {  // main_button.counter < BUTTON_THRESHOLD1 < BUTTON_THRESHOLD2
+      main_button.counter = 0;
+      main_button.state = DEPRESSED;
     }
   }
 }
 
 void systemTick() {
-  systemTimer.tick = true;
-  if (++systemTimer.counter == FINAL_TICK) {
-    systemTimer.counter = 0;
+  system_timer.tick = true;
+  if (++system_timer.counter == FINAL_TICK) {
+    system_timer.counter = 0;
   }  
-  //~ displayShowDigit(display_digits_pins[systemTimer.counter], raw_data[systemTimer.counter]);
+}
 
-  //~ Serial.println("digit!");
-
+void showNextDigit() {
+  //~ displayShowDigit(display_digits_pins[system_timer.counter], raw_data[system_timer.counter]);
+  ;
 }
