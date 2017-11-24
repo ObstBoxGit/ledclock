@@ -1,731 +1,259 @@
-/* 1. UNSET не нужен. вместо него RTC_FAIL 
- * 2. LDR учитывать в режимах WATCH и UNSET
- * 3. Отладка ошибок RTC
- * 4. может стоит убрать SETTING из switch'а в начало loop() { if {..} } ?
- */
-
+/**********************************************************************
+ * 
+ * 
+ * *******************************************************************/
 #define SERIAL_DEBUG 
- 
+
 #include <Wire.h>
 #include <TimeLib.h>
 #include <DS1307RTC.h>
- 
-// pressures
-#define DEPRESSED          0
-#define SHORT              1
-#define LONG               2
+#include <MsTimer2.h>
 
-// modes
-#define UNSET              0
-#define WATCH              1
-#define SETTING            2
-#define RTC_FAIL           3
 
-// circles drawning
-#define CIRCLE_MAGIC       40
-#define N_CIRCLES          8
-#define BLINK_MIN          100
-#define BLINK_MAX          150
+// display com pins
+#define HOUR_TENS_LED_PIN      A0
+#define HOUR_UNITS_LED_PIN     A1
+#define MINUTE_TENS_LED_PIN    2
+#define MINUTE_UNITS_LED_PIN   3
 
-// pins
-#define NO_LED             0
-#define HOUR_TENS_LED      A0
-#define HOUR_UNITS_LED     A1
-#define MINUTE_TENS_LED    2
-#define MINUTE_UNITS_LED   3
-#define LDR_PIN            A2
+#define LED_A_PIN              8
+#define LED_B_PIN              11
+#define LED_C_PIN              10
+#define LED_D_PIN              9
+#define LED_E_PIN              6
+#define LED_F_PIN              7
+#define LED_G_PIN              12
+#define ROUND_LED_PIN           5
 
-#define BUTTON_PIN         4
+#define LDR_PIN                A2
+#define MAIN_BUTTON_PIN             4
 
-#define LED_G              12
-#define LED_B              11
-#define LED_C              10
-#define LED_D              9
-#define LED_A              8
-#define LED_F              7
-#define LED_E              6
+// thr1 = 2 thr2 = 8 at 100us
+#define BUTTON_THRESHOLD1        5
+//~ #define BUTTON_THRESHOLD2        50
+#define BUTTON_THRESHOLD2        20
 
-// symbols
-#define SYMBOL_0           0
-#define SYMBOL_1           1
-#define SYMBOL_2           2
-#define SYMBOL_3           3
-#define SYMBOL_4           4
-#define SYMBOL_5           5
-#define SYMBOL_6           6
-#define SYMBOL_7           7
-#define SYMBOL_8           8
-#define SYMBOL_9           9
-#define SYMBOL_MINUS       10
-#define SYMBOL_NONE        11
-#define SYMBOL_r           12
-#define SYMBOL_t           13
-#define SYMBOL_c           14
-#define SYMBOL_E           15
+#define DISPLAY_PERIOD_FULL_US              2000 // us
+#define LEDS_OFF_DURATION_DEFAULT_US     10
+#define LEDS_ON_DURATION_DEFAULT_US  (DISPLAY_PERIOD_FULL_US - LEDS_OFF_DURATION_DEFAULT_US)
 
-// other stuff
-#define DELAY_FULL 2000         // us
-#define BUTTON_THRESHOLD1  5
-#define BUTTON_THRESHOLD2  50
-// #define BUTTON_THRESHOLD2  100
-#define LDR_THRESHOLD_MIN  600
-#define LDR_THRESHOLD_MED  900
-#define LDR_THRESHOLD_MAX  1010 // <= 1024
+#define TIMER_INTERRUPT_UP      7
 
-// variables
-struct newTime{
-  unsigned char hourTens;
-  unsigned char hourUnits;  
-  unsigned char minuteTens;
-  unsigned char minuteUnits;
-  unsigned char seconds;
-  boolean flag; 
-} 
-currentTime;
+#define SYMBOL_SEGMENTS_AMOUNT    7
+#define DISPLAY_DIGITS_AMOUNT      4
+#define FINAL_TICK 4
 
-struct newButton{
-  unsigned char counter;
-  unsigned char state;  
-} 
-mainButton;
+enum ButtonState {
+    DEPRESSED = 0,
+    SHORT_PRESS,
+    LONG_PRESS
+};
 
-unsigned char deviceMode;
-byte temp;
-byte blinkCounter;
-byte selector;
-unsigned int secondsCounter;
-unsigned int LDRSignal;
-unsigned int delayOn;
-unsigned int delayOff;
-unsigned int i = 0;
+enum Symbol {
+    SYMBOL_0 = 0,
+    SYMBOL_1,
+    SYMBOL_2,
+    SYMBOL_3,
+    SYMBOL_4,
+    SYMBOL_5,
+    SYMBOL_6,
+    SYMBOL_7,
+    SYMBOL_8,
+    SYMBOL_9,
+    SYMBOL_NONE,
+    SYMBOL_MINUS,
+    SYMBOL_r,
+    SYMBOL_t,
+    SYMBOL_c,
+    SYMBOL_E,
+    SYMBOL_AMOUNT           // used for assert
+};
 
-// function prototypes
-void LedSwitch(unsigned char Led);
-void ShowSymbol(unsigned char Symbol);
-void ReadMainButton();
-int  ReadLDR();
-void GetLedDelays();
+//~ static uint8_t        display_data[DISPLAY_DIGITS_AMOUNT];
+static const uint8_t  display_digits_pins[DISPLAY_DIGITS_AMOUNT] = { HOUR_TENS_LED_PIN, 
+  HOUR_UNITS_LED_PIN, MINUTE_TENS_LED_PIN, MINUTE_UNITS_LED_PIN };
 
-tmElements_t time;
+static const uint8_t symbol_segments_pins[SYMBOL_SEGMENTS_AMOUNT] = { LED_A_PIN, LED_B_PIN, 
+  LED_C_PIN, LED_D_PIN, LED_E_PIN, LED_F_PIN, LED_G_PIN };
 
-//--------------------------------------------------
-void setup() {
-  digitalWrite(HOUR_TENS_LED,    HIGH);
-  digitalWrite(HOUR_UNITS_LED,   HIGH);
-  digitalWrite(MINUTE_TENS_LED,  HIGH);
-  digitalWrite(MINUTE_UNITS_LED, HIGH); 
-  digitalWrite(LED_G, HIGH);
-  delay(1234);
+static const uint8_t symbol_decode_table[SYMBOL_AMOUNT][SYMBOL_SEGMENTS_AMOUNT] = 
+  {{ HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, LOW },       // SYMBOL_0 
+  { HIGH, HIGH, LOW, LOW, LOW, LOW, LOW },            // SYMBOL_1
+  { HIGH, LOW, HIGH, HIGH, LOW, HIGH, HIGH },         // SYMBOL_2
+  { HIGH, HIGH, HIGH, LOW, LOW, HIGH, HIGH },         // SYMBOL_3
+  { HIGH, HIGH, LOW, LOW, HIGH, LOW, HIGH },          // SYMBOL_4
+  
+  
+  { LOW, HIGH, HIGH, LOW, HIGH, HIGH, HIGH },         // SYMBOL_5
+  { LOW, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH },        // SYMBOL_6
+  { HIGH, HIGH, LOW, LOW, LOW, HIGH, LOW },           // SYMBOL_7
+  { HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH },       // SYMBOL_8
+  { HIGH, HIGH, HIGH, LOW, HIGH, HIGH, HIGH },        // SYMBOL_9
+  { LOW, LOW, LOW, LOW, LOW, LOW, LOW },              // SYMBOL_NONE
+  { LOW, LOW, LOW, LOW, LOW, LOW, HIGH},              // SYMBOL_MINUS
+  { LOW, LOW, LOW, HIGH, LOW, LOW, HIGH },            // SYMBOL_r
+  { LOW, LOW, HIGH, HIGH, HIGH, LOW, HIGH },          // SYMBOL_t
+  { LOW, LOW, HIGH, HIGH, LOW, LOW, HIGH },           // SYMBOL_c
+  { LOW, LOW, HIGH, HIGH, HIGH, HIGH, HIGH }};        // SYMBOL_E
+  
 
-  digitalWrite( LED_A, LOW);
-  digitalWrite( LED_B, LOW);
-  digitalWrite( LED_C, LOW);
-  digitalWrite( LED_D, LOW);
-  digitalWrite( LED_E, LOW);
-  digitalWrite( LED_F, LOW);
-  digitalWrite( LED_G, LOW);
-  digitalWrite( 5, LOW);
+uint16_t leds_on_duration = LEDS_ON_DURATION_DEFAULT_US;
+uint16_t leds_off_duration = LEDS_OFF_DURATION_DEFAULT_US;
 
-  pinMode(BUTTON_PIN, INPUT);
+uint16_t system_timer_counter = 0;
+
+typedef struct {
+  uint8_t counter;
+  ButtonState state;
+} Button;
+
+typedef struct {
+  uint16_t counter;
+  boolean tick;
+} SystemTimer;
+
+Button mainButton;
+SystemTimer systemTimer;
+  
+
+uint8_t const raw_data[DISPLAY_DIGITS_AMOUNT] = {6,7,8,9};
+
+// --------------------------------------------------------------------------------------------------------------
+void setup () {
+  pinMode(MAIN_BUTTON_PIN, INPUT);
   pinMode(LDR_PIN, INPUT);
-  digitalWrite(BUTTON_PIN, HIGH);
+
+  pinMode(LED_A_PIN, OUTPUT);
+  pinMode(LED_B_PIN, OUTPUT);
+  pinMode(LED_C_PIN, OUTPUT);
+  pinMode(LED_D_PIN, OUTPUT);
+  pinMode(LED_E_PIN, OUTPUT);
+  pinMode(LED_F_PIN, OUTPUT);
+  pinMode(LED_G_PIN, OUTPUT);
+  pinMode(ROUND_LED_PIN, OUTPUT);
+  
+  pinMode(HOUR_TENS_LED_PIN, OUTPUT);
+  pinMode(HOUR_UNITS_LED_PIN, OUTPUT);
+  pinMode(MINUTE_TENS_LED_PIN, OUTPUT);
+  pinMode(MINUTE_UNITS_LED_PIN, OUTPUT);
+  
+  digitalWrite(HOUR_TENS_LED_PIN,    LOW);
+  digitalWrite(HOUR_UNITS_LED_PIN,   LOW);
+  digitalWrite(MINUTE_TENS_LED_PIN,  LOW);
+  digitalWrite(MINUTE_UNITS_LED_PIN, LOW); 
+  
+  digitalWrite(MAIN_BUTTON_PIN, HIGH);
   digitalWrite(LDR_PIN, HIGH);
 
-  pinMode(LED_A, OUTPUT);
-  pinMode(LED_B, OUTPUT);
-  pinMode(LED_C, OUTPUT);
-  pinMode(LED_D, OUTPUT);
-  pinMode(LED_E, OUTPUT);
-  pinMode(LED_F, OUTPUT);
-  pinMode(LED_G, OUTPUT);
+  digitalWrite(LED_A_PIN, LOW);
+  digitalWrite(LED_B_PIN, LOW);
+  digitalWrite(LED_C_PIN, LOW);
+  digitalWrite(LED_D_PIN, LOW);
+  digitalWrite(LED_E_PIN, LOW);
+  digitalWrite(LED_F_PIN, LOW);
+  digitalWrite(LED_G_PIN, LOW);
+  digitalWrite(ROUND_LED_PIN, LOW);
+
+  systemTimer.counter = 0;
+  systemTimer.tick = false;
+
+  MsTimer2::set(TIMER_INTERRUPT_UP, systemTick);
+  MsTimer2::start();
+
+  Serial.begin(9600);
+}
+
+// --------------------------------------------------------------------------------------------------------------
+void loop() {
+  //~ for (uint8_t i = 0; i < DISPLAY_DIGITS_AMOUNT; i++) {    
+    //~ displayShowDigit(HOUR_TENS_LED_PIN, SYMBOL_7);
+    //~ displayShowDigit(HOUR_UNITS_LED_PIN, SYMBOL_MINUS);
+    //~ displayShowDigit(MINUTE_TENS_LED_PIN, SYMBOL_MINUS);
+    //~ displayShowDigit(MINUTE_UNITS_LED_PIN, SYMBOL_9);    
+  //~ }   
   
-  pinMode(HOUR_TENS_LED, OUTPUT);
-  pinMode(HOUR_UNITS_LED, OUTPUT);
-  pinMode(MINUTE_TENS_LED, OUTPUT);
-  pinMode(MINUTE_UNITS_LED, OUTPUT);
-
-  currentTime.hourTens    = 0;
-  currentTime.hourUnits   = 7;
-  currentTime.minuteTens  = 2;
-  currentTime.minuteUnits = 9;  
-  currentTime.flag    = false;
-  currentTime.seconds = 0;
-
-  mainButton.counter  = 0;  
-  mainButton.state    = DEPRESSED;  
-
-  temp = 0;
-  delayOn  = 0;
-  delayOff = 0;  
-  selector = 0;      
-  blinkCounter = 0;
-  LDRSignal    = 0;
-  deviceMode   = UNSET;  
-	
-	#ifdef SERIAL_DEBUG
-	Serial.begin(9600);
-  // while (!Serial) ; // wait for serial
-  delay(200);
-	#endif
-}
-
-void loop() {	
-
-	if (deviceMode != SETTING) {	 // otherwise SETTING mode will be never reached
-		
-		if (RTC.read(time)) {        // RTC is online, time is set
-			 deviceMode = WATCH;
-		}	else {
-			if (RTC.chipPresent()) {	// time not set yet
-				deviceMode = UNSET;
-			} else {			
-				deviceMode = RTC_FAIL;	
-			}
-		}
-	}
-	
-  switch(deviceMode) {
-  case UNSET:    
-	
-		DebugMessage("Unset");
-
-    GetLedDelays();
-
-    LedSwitch(MINUTE_UNITS_LED);
-    ShowSymbol(SYMBOL_MINUS);
-    delayMicroseconds(delayOn);
-    LedSwitch(NO_LED);
-    delayMicroseconds(delayOff);
-
-    LedSwitch(MINUTE_TENS_LED);
-    ShowSymbol(SYMBOL_MINUS);        
-    delayMicroseconds(delayOn);
-    LedSwitch(NO_LED);
-    delayMicroseconds(delayOff);
-
-    LedSwitch(HOUR_UNITS_LED);
-    ShowSymbol(SYMBOL_MINUS);                
-    delayMicroseconds(delayOn);
-    LedSwitch(NO_LED);
-    delayMicroseconds(delayOff);
-
-    LedSwitch(HOUR_TENS_LED);
-    ShowSymbol(SYMBOL_MINUS);
-    delayMicroseconds(delayOn);
-    LedSwitch(NO_LED);
-    delayMicroseconds(delayOff);
-
-    ReadMainButton(); 
-
-    if (mainButton.state == LONG) {
-      temp = 0;
-      currentTime.seconds = 0;
-      mainButton.state  = DEPRESSED;
-      deviceMode = SETTING;          
-    }		
-	
-    break;
-		
-		
-		
-
-  case WATCH:
-
-		DebugMessage("Watch");
+  if ( systemTimer.tick == true) {
+    systemTimer.tick = false;
     
-		GetLedDelays();  // calculate delayOn and delayOff
+    displayShowDigit(display_digits_pins[systemTimer.counter], raw_data[systemTimer.counter]);  
     
-		TimeToTensUnits();
-		
-		LedSwitch(HOUR_TENS_LED);
-    ShowSymbol(currentTime.hourTens);
-    delayMicroseconds(delayOn);
-    LedSwitch(NO_LED);
-    delayMicroseconds(delayOff);
-
-    LedSwitch(HOUR_UNITS_LED);
-    ShowSymbol(currentTime.hourUnits);
-    delayMicroseconds(delayOn);
-    LedSwitch(NO_LED);
-    delayMicroseconds(delayOff);
-
-    LedSwitch(MINUTE_TENS_LED);
-    ShowSymbol(currentTime.minuteTens);
-    delayMicroseconds(delayOn);
-    LedSwitch(NO_LED);
-    delayMicroseconds(delayOff);
-
-    LedSwitch(MINUTE_UNITS_LED);
-    ShowSymbol(currentTime.minuteUnits);
-    delayMicroseconds(delayOn);
-    LedSwitch(NO_LED);
-    delayMicroseconds(delayOff);    
-
-    ReadMainButton();
-		if (mainButton.state == SHORT) {      
-			mainButton.state  = DEPRESSED;
-			DebugMessage("watch.short");
-    }
-    if (mainButton.state == LONG) {
-      deviceMode = SETTING;      
-			mainButton.state  = DEPRESSED;
-			DebugMessage("watch.long");
-    }
-		
-    break;
-		
-		
-		
-
-  case SETTING:
-		
-			// time.Hour = 23;
-			// time.Minute = 59;
-			// RTC.write(time);
-		DebugMessage("Setting");
-		
-		TimeToTensUnits();
-		
-    switch(selector) {
-    case 0:            
-      ShowSymbol(currentTime.hourTens);             
-      digitalWrite(MINUTE_UNITS_LED, LOW);   
-      digitalWrite(MINUTE_TENS_LED, LOW);                                   
-      digitalWrite(HOUR_UNITS_LED, LOW); 
-
-      if (blinkCounter++ > BLINK_MIN) {
-        digitalWrite( HOUR_TENS_LED, LOW);          
-        if (blinkCounter > BLINK_MAX) blinkCounter = 0;
-      }
-      else digitalWrite( HOUR_TENS_LED, HIGH);  
-
-      ReadMainButton();
-
-      /* if (mainButton.state == SHORT) {
-        currentTime.hourTens++;
-        if (currentTime.hourTens > 2) currentTime.hourTens = 0;
-        mainButton.state  = DEPRESSED;
-      } */
-      if (mainButton.state == LONG) {
-        selector++;
-        blinkCounter = 0;
-        mainButton.state  = DEPRESSED;
-      }   
-      delayMicroseconds(DELAY_FULL); 
-      break;
-
-    case 1:     
-      ShowSymbol(currentTime.hourUnits);             
-      digitalWrite(MINUTE_UNITS_LED, LOW);   
-      digitalWrite(MINUTE_TENS_LED, LOW);                                   
-      digitalWrite(HOUR_TENS_LED, LOW); 
-
-      if (blinkCounter++ > BLINK_MIN) {
-        digitalWrite( HOUR_UNITS_LED, LOW);          
-        if (blinkCounter > BLINK_MAX) blinkCounter = 0;
-      }
-      else digitalWrite( HOUR_UNITS_LED, HIGH);  
-
-      ReadMainButton();
-
-      /* if (mainButton.state == SHORT) {
-        currentTime.hourUnits++;
-        if (currentTime.hourTens < 2) {
-          if (currentTime.hourUnits > 9) currentTime.hourUnits = 0;
-        }
-        else {
-          if (currentTime.hourUnits > 3) currentTime.hourUnits = 0;
-        }
-        mainButton.state  = DEPRESSED;
-      } */
-      if (mainButton.state == LONG) {
-        selector++;
-        blinkCounter = 0;
-        mainButton.state  = DEPRESSED;
-      }   
-      delayMicroseconds(DELAY_FULL); 
-      break;
-
-    case 2:
-      ShowSymbol(currentTime.minuteTens);      
-      digitalWrite(MINUTE_UNITS_LED, LOW);
-      digitalWrite(HOUR_UNITS_LED, LOW);             
-      digitalWrite(HOUR_TENS_LED, LOW); 
-
-      if (blinkCounter++ > BLINK_MIN) {
-        digitalWrite( MINUTE_TENS_LED, LOW);          
-        if (blinkCounter > BLINK_MAX) blinkCounter = 0;
-      }
-      else digitalWrite( MINUTE_TENS_LED, HIGH);  
-
-      ReadMainButton();
-
-      /* if (mainButton.state == SHORT) {
-        currentTime.minuteTens++;
-        if (currentTime.minuteTens > 5) currentTime.minuteTens = 0;
-        mainButton.state  = DEPRESSED;
-      } */
-      if (mainButton.state == LONG) {
-        selector++;
-        blinkCounter = 0;
-        mainButton.state  = DEPRESSED;
-      }   
-      delayMicroseconds(DELAY_FULL); 
-      break;
-
-    case 3:
-      ShowSymbol(currentTime.minuteUnits); 
-      digitalWrite(MINUTE_TENS_LED, LOW);        
-      digitalWrite(HOUR_UNITS_LED, LOW);             
-      digitalWrite(HOUR_TENS_LED, LOW);
-
-      if (blinkCounter++ > BLINK_MIN) {
-        digitalWrite( MINUTE_UNITS_LED, LOW);          
-        if (blinkCounter > BLINK_MAX) blinkCounter = 0;
-      }
-      else digitalWrite( MINUTE_UNITS_LED, HIGH);  
-
-      ReadMainButton();
-
-      /* if (mainButton.state == SHORT) {
-        currentTime.minuteUnits++;
-        if (currentTime.minuteUnits > 9) currentTime.minuteUnits = 0;
-        mainButton.state  = DEPRESSED;
-      } */
-      if (mainButton.state == LONG) {
-        selector = 0;
-        deviceMode = WATCH;
-        blinkCounter = 0;
-        mainButton.state  = DEPRESSED;
-      }   
-      delayMicroseconds(DELAY_FULL); 		
-      break;       
-
-    default:     
-			break;
-    }		
-
-		break;
-		
-		
-		
-		
-  case RTC_FAIL:
-		
-		DebugMessage("RTC fail");		
-		
-		currentTime.hourTens    = SYMBOL_r;
-		currentTime.hourUnits   = SYMBOL_t;
-		currentTime.minuteTens  = SYMBOL_c;
-		currentTime.minuteUnits = SYMBOL_E;		
-		
-		GetLedDelays();
-		
-		LedSwitch(HOUR_TENS_LED);
-    ShowSymbol(currentTime.hourTens);
-    delayMicroseconds(delayOn);
-    LedSwitch(NO_LED);
-    delayMicroseconds(delayOff);
-
-    LedSwitch(HOUR_UNITS_LED);
-    ShowSymbol(currentTime.hourUnits);
-    delayMicroseconds(delayOn);
-    LedSwitch(NO_LED);
-    delayMicroseconds(delayOff);
-
-    LedSwitch(MINUTE_TENS_LED);
-    ShowSymbol(currentTime.minuteTens);
-    delayMicroseconds(delayOn);
-    LedSwitch(NO_LED);
-    delayMicroseconds(delayOff);
-
-    LedSwitch(MINUTE_UNITS_LED);
-    ShowSymbol(currentTime.minuteUnits);
-    delayMicroseconds(delayOn);
-    LedSwitch(NO_LED);
-    delayMicroseconds(delayOff);
-		
-		break;
-		
-		
-		
-	
-	default:
-    DebugMessage("Default");
-		break;
-  }  
-}
-
-void ShowSymbol(unsigned char Symbol) {
-  switch(Symbol)
-  {
-  case SYMBOL_0:
-    digitalWrite( LED_A, HIGH);
-    digitalWrite( LED_B, HIGH);
-    digitalWrite( LED_C, HIGH);
-    digitalWrite( LED_D, HIGH);
-    digitalWrite( LED_E, HIGH);
-    digitalWrite( LED_F, HIGH);
-    digitalWrite( LED_G, LOW);
-    break;
-
-  case SYMBOL_1:
-    digitalWrite( LED_A, HIGH);
-    digitalWrite( LED_B, HIGH);
-    digitalWrite( LED_C, LOW);
-    digitalWrite( LED_D, LOW);
-    digitalWrite( LED_E, LOW);
-    digitalWrite( LED_F, LOW);
-    digitalWrite( LED_G, LOW);
-    break;
-
-  case SYMBOL_2:
-    digitalWrite( LED_A, HIGH);
-    digitalWrite( LED_B, LOW);
-    digitalWrite( LED_C, HIGH);
-    digitalWrite( LED_D, HIGH);
-    digitalWrite( LED_E, LOW);
-    digitalWrite( LED_F, HIGH);
-    digitalWrite( LED_G, HIGH);
-    break;
-
-  case SYMBOL_3:
-    digitalWrite( LED_A, HIGH);
-    digitalWrite( LED_B, HIGH);
-    digitalWrite( LED_C, HIGH);
-    digitalWrite( LED_D, LOW);
-    digitalWrite( LED_E, LOW);
-    digitalWrite( LED_F, HIGH);
-    digitalWrite( LED_G, HIGH); 
-    break;
-
-  case SYMBOL_4:
-    digitalWrite( LED_A, HIGH);
-    digitalWrite( LED_B, HIGH);
-    digitalWrite( LED_C, LOW);
-    digitalWrite( LED_D, LOW);
-    digitalWrite( LED_E, HIGH);
-    digitalWrite( LED_F, LOW);
-    digitalWrite( LED_G, HIGH);
-    break;
-
-  case SYMBOL_5:
-    digitalWrite( LED_A, LOW);
-    digitalWrite( LED_B, HIGH);
-    digitalWrite( LED_C, HIGH);
-    digitalWrite( LED_D, LOW);
-    digitalWrite( LED_E, HIGH);
-    digitalWrite( LED_F, HIGH);
-    digitalWrite( LED_G, HIGH);
-    break;
-
-  case SYMBOL_6:
-    digitalWrite( LED_A, LOW);
-    digitalWrite( LED_B, HIGH);
-    digitalWrite( LED_C, HIGH);
-    digitalWrite( LED_D, HIGH);
-    digitalWrite( LED_E, HIGH);
-    digitalWrite( LED_F, HIGH);
-    digitalWrite( LED_G, HIGH);
-    break;
-
-  case SYMBOL_7:
-    digitalWrite( LED_A, HIGH);
-    digitalWrite( LED_B, HIGH);
-    digitalWrite( LED_C, LOW);
-    digitalWrite( LED_D, LOW);
-    digitalWrite( LED_E, LOW);
-    digitalWrite( LED_F, HIGH);
-    digitalWrite( LED_G, LOW);
-    break;
-
-  case SYMBOL_8:
-    digitalWrite( LED_A, HIGH);
-    digitalWrite( LED_B, HIGH);
-    digitalWrite( LED_C, HIGH);
-    digitalWrite( LED_D, HIGH);
-    digitalWrite( LED_E, HIGH);
-    digitalWrite( LED_F, HIGH);
-    digitalWrite( LED_G, HIGH);
-    break;
-
-  case SYMBOL_9:
-    digitalWrite( LED_A, HIGH);
-    digitalWrite( LED_B, HIGH);
-    digitalWrite( LED_C, HIGH);
-    digitalWrite( LED_D, LOW);
-    digitalWrite( LED_E, HIGH);
-    digitalWrite( LED_F, HIGH);
-    digitalWrite( LED_G, HIGH);
-    break;
-
-  case SYMBOL_NONE: 
-    digitalWrite( LED_A, LOW);
-    digitalWrite( LED_B, LOW);
-    digitalWrite( LED_C, LOW);
-    digitalWrite( LED_D, LOW);
-    digitalWrite( LED_E, LOW);
-    digitalWrite( LED_F, LOW);
-    digitalWrite( LED_G, LOW);
-    break;
-
-  case SYMBOL_MINUS: 
-    digitalWrite( LED_A, LOW);
-    digitalWrite( LED_B, LOW);
-    digitalWrite( LED_C, LOW);
-    digitalWrite( LED_D, LOW);
-    digitalWrite( LED_E, LOW);
-    digitalWrite( LED_F, LOW);
-    digitalWrite( LED_G, HIGH);
-    break;
-
-	case SYMBOL_r: 
-    digitalWrite( LED_A, LOW);
-    digitalWrite( LED_B, LOW);
-    digitalWrite( LED_C, LOW);
-    digitalWrite( LED_D, HIGH);
-    digitalWrite( LED_E, LOW);
-    digitalWrite( LED_F, LOW);
-    digitalWrite( LED_G, HIGH);
-    break;
-
-	case SYMBOL_t: 
-    digitalWrite( LED_A, LOW);
-    digitalWrite( LED_B, LOW);
-    digitalWrite( LED_C, HIGH);
-    digitalWrite( LED_D, HIGH);
-    digitalWrite( LED_E, HIGH);
-    digitalWrite( LED_F, LOW);
-    digitalWrite( LED_G, HIGH);
-    break;
-	
-	case SYMBOL_c: 
-    digitalWrite( LED_A, LOW);
-    digitalWrite( LED_B, LOW);
-    digitalWrite( LED_C, HIGH);
-    digitalWrite( LED_D, HIGH);
-    digitalWrite( LED_E, LOW);
-    digitalWrite( LED_F, LOW);
-    digitalWrite( LED_G, HIGH);
-    break;
-
-	case SYMBOL_E:
-    digitalWrite( LED_A, LOW);
-    digitalWrite( LED_B, LOW);
-    digitalWrite( LED_C, HIGH);
-    digitalWrite( LED_D, HIGH);
-    digitalWrite( LED_E, HIGH);
-    digitalWrite( LED_F, HIGH);
-    digitalWrite( LED_G, HIGH);
-		break;
-
-  default:
-    break;
+    if (systemTimer.counter % 3 == 1) {  
+      readButton();          
+      //~ Serial.println("readed a button!");
+    //~ } else {
+      //~ Serial.println("casual");
+    } 
+  
+    if (mainButton.state == LONG_PRESS) Serial.println("so looong");
+    if (mainButton.state == SHORT_PRESS) Serial.println("shrt");
   }
 }
 
-void LedSwitch(unsigned char Led) {
-  switch(Led) 
-  {
-  case HOUR_TENS_LED:
-    digitalWrite(HOUR_TENS_LED,    HIGH);
-    digitalWrite(HOUR_UNITS_LED,   LOW);
-    digitalWrite(MINUTE_TENS_LED,  LOW);
-    digitalWrite(MINUTE_UNITS_LED, LOW);            
-    break;
-  case HOUR_UNITS_LED:
-    digitalWrite(HOUR_TENS_LED,    LOW);
-    digitalWrite(HOUR_UNITS_LED,   HIGH);
-    digitalWrite(MINUTE_TENS_LED,  LOW);
-    digitalWrite(MINUTE_UNITS_LED, LOW);            
-    break;
-  case MINUTE_TENS_LED:
-    digitalWrite(HOUR_TENS_LED,    LOW);
-    digitalWrite(HOUR_UNITS_LED,   LOW);
-    digitalWrite(MINUTE_TENS_LED,  HIGH);
-    digitalWrite(MINUTE_UNITS_LED, LOW);            
-    break;
-  case MINUTE_UNITS_LED:
-    digitalWrite(HOUR_TENS_LED,    LOW);
-    digitalWrite(HOUR_UNITS_LED,   LOW);
-    digitalWrite(MINUTE_TENS_LED,  LOW);
-    digitalWrite(MINUTE_UNITS_LED, HIGH);            
-    break;
-  default:// NO_LED
-    digitalWrite(HOUR_TENS_LED,    LOW);
-    digitalWrite(HOUR_UNITS_LED,   LOW);
-    digitalWrite(MINUTE_TENS_LED,  LOW);
-    digitalWrite(MINUTE_UNITS_LED, LOW);            
+
+// --------------------------------------------------------------------------------------------------------------
+void displayShowDigit(uint8_t index, uint8_t current_symbol) {
+    
+  leds_off_duration = map(readLightDrivenResistor(), 0, 1023, 0, DISPLAY_PERIOD_FULL_US);
+  leds_on_duration = DISPLAY_PERIOD_FULL_US - leds_off_duration;
+
+  setDigitalSegments(current_symbol);
+
+  displayDigitOn(index);
+  delayMicroseconds(leds_on_duration);
+    
+  displayDigitOff(index);
+  delayMicroseconds(leds_off_duration);
+}
+
+void displayDigitOff(uint8_t pin) {
+  digitalWrite(pin, LOW);  
+  }
+
+void displayDigitOn(uint8_t pin) {
+  digitalWrite(pin, HIGH);
+  }
+
+void setDigitalSegments(uint8_t data) {
+  if (data > SYMBOL_AMOUNT) {
+    return;
+  }
+  for (uint8_t i = 0; i < SYMBOL_SEGMENTS_AMOUNT; i++ ) {
+    digitalWrite(symbol_segments_pins[i], symbol_decode_table[data][i]);
   }
 }
 
-void ReadMainButton() {  
-  delayMicroseconds(DELAY_FULL);         // have to wait in any case
+uint16_t readLightDrivenResistor() {
+  uint16_t value = analogRead(LDR_PIN);
+  return value;
+}
 
-  if (digitalRead(BUTTON_PIN) == LOW)    // is pressed
-  {
+void readButton() {
+  if (digitalRead(MAIN_BUTTON_PIN) == LOW) {    // is pressed
     if (mainButton.counter <= BUTTON_THRESHOLD2) mainButton.counter++;
   }
-  else
-  {
-    if ((mainButton.counter >= BUTTON_THRESHOLD1) && (mainButton.counter < BUTTON_THRESHOLD2))
-    {
+  else {    // is released
+    if ((mainButton.counter >= BUTTON_THRESHOLD1) && (mainButton.counter < BUTTON_THRESHOLD2)) {
       mainButton.counter = 0;
-      mainButton.state = SHORT;
+      mainButton.state = SHORT_PRESS;
     }
-    else if ((mainButton.counter >= BUTTON_THRESHOLD1) && (mainButton.counter > BUTTON_THRESHOLD2))
-    {
+    else if (mainButton.counter >= BUTTON_THRESHOLD2) {
       mainButton.counter = 0;
-      mainButton.state = LONG;
+      mainButton.state = LONG_PRESS;
     }
-    else  // mainButton.counter < BUTTON_THRESHOLD1 < BUTTON_THRESHOLD2
-    {
+    else {  // mainButton.counter < BUTTON_THRESHOLD1 < BUTTON_THRESHOLD2
       mainButton.counter = 0;
       mainButton.state = DEPRESSED;
     }
   }
-} 
-
-int ReadLDR() {
-  int value = analogRead(LDR_PIN);
-  return value;
 }
 
-void GetLedDelays() {
-  LDRSignal  = analogRead(LDR_PIN);
-
-  if      (LDRSignal  >= 0  && LDRSignal <=  400) {
-    delayOn = 1980;
-    delayOff = DELAY_FULL - delayOn;
+void systemTick() {
+  systemTimer.tick = true;
+  if (++systemTimer.counter == FINAL_TICK) {
+    systemTimer.counter = 0;
   }  
-  else if (LDRSignal > 400  && LDRSignal <=  800) {
-    delayOn = 1200;
-    delayOff = DELAY_FULL - delayOn;
-  }
-  else if (LDRSignal > 800  && LDRSignal <=  900) {
-    delayOn = 600;
-    delayOff = DELAY_FULL - delayOn;
-  }
-  else if (LDRSignal > 900  && LDRSignal <= 1000) {
-    delayOn = 200;
-    delayOff = DELAY_FULL - delayOn;
-  }
-  else {
-    delayOn = 80;
-    delayOff = DELAY_FULL - delayOn;
-  }	
-}
+  //~ displayShowDigit(display_digits_pins[systemTimer.counter], raw_data[systemTimer.counter]);
 
-void DebugMessage(String str) {
-	#ifdef SERIAL_DEBUG
-	Serial.println(str);
-	delay(30);
-	#endif
-}
+  //~ Serial.println("digit!");
 
-void TimeToTensUnits() {
-		currentTime.hourTens    = time.Hour / 10;
-		currentTime.hourUnits   = time.Hour % 10;
-		currentTime.minuteTens  = time.Minute / 10;
-		currentTime.minuteUnits = time.Minute % 10;
 }
